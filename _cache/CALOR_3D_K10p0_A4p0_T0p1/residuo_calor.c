@@ -1,0 +1,1 @@
+/home/wellington/Documentos/virtual-lab/poisson-multigrid-lab/Multigrid/residuo_calor.c

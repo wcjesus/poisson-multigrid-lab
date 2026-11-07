@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multigrid — Poisson e equação do calor</title>
+<style>
+  :root { --bg:#fff; --fg:#222; --card:#f6f6f6; --borda:#ddd; --azul:#2459a6;
+          --meta:#eef3fb; --erro-bg:#fde2e1; --erro-bd:#e0a0a0; --pre:#fafafa; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16181c; --fg:#e6e6e6; --card:#22262c; --borda:#3a3f47;
+            --azul:#7fb0ff; --meta:#1d2733; --erro-bg:#4a2321; --erro-bd:#8a4a47;
+            --pre:#1c1f24; }
+  }
+  body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 1.5rem auto;
+         padding: 0 1rem; background: var(--bg); color: var(--fg); }
+  h1 { font-size: 1.35rem; margin: 0 0 1rem; }
+  h2 { font-size: 1.05rem; margin: 1.6rem 0 .5rem; }
+  .controles { background: var(--card); padding: 1rem 1.25rem; border-radius: 8px;
+               border: 1px solid var(--borda); }
+  .linha { display: grid; grid-template-columns: 13rem 1fr 9rem; gap: .75rem;
+           align-items: center; margin: .6rem 0; }
+  .linha > label { font-weight: 500; }
+  .linha input[type=range] { width: 100%; }
+  .linha output { font-family: monospace; font-weight: 700; color: var(--azul); text-align: right; }
+  .grupo { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .grupo input { position: absolute; opacity: 0; }
+  .grupo label { padding: .35rem .8rem; border: 1px solid var(--borda); border-radius: 6px;
+                 cursor: pointer; background: var(--bg); }
+  .grupo input:checked + label { background: var(--azul); color: #fff; border-color: var(--azul); }
+  .grupo input:focus-visible + label { outline: 2px solid var(--azul); outline-offset: 2px; }
+  .acoes { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin-top: 1rem; }
+  button { font: inherit; padding: .45rem 1rem; border-radius: 6px; cursor: pointer;
+           border: 1px solid var(--azul); background: var(--azul); color: #fff; }
+  button.sec { background: transparent; color: var(--azul); }
+  button:disabled { opacity: .5; cursor: wait; }
+  .auto { margin-left: auto; font-size: .9rem; }
+  .dica { font-size: .82rem; opacity: .75; }
+  #status { margin: 1rem 0 0; font-style: italic; opacity: .8; min-height: 1.3em; }
+  .erro { background: var(--erro-bg); border: 1px solid var(--erro-bd); padding: .75rem 1rem;
+          border-radius: 6px; margin-top: 1rem; white-space: pre-wrap; }
+  .cmd { font-family: monospace; background: var(--meta); padding: .5rem .8rem;
+         border-radius: 6px; margin-top: 1rem; overflow-x: auto; }
+  table { border-collapse: collapse; margin: .4rem 0; font-size: .92rem; }
+  td { padding: .2rem 1rem .2rem 0; } td:last-child { font-family: monospace; }
+  img { max-width: 100%; border: 1px solid var(--borda); border-radius: 6px; background: #fff; }
+  pre { background: var(--pre); border: 1px solid var(--borda); border-radius: 6px;
+        padding: 1rem; overflow-x: auto; font-size: .8rem; line-height: 1.35; }
+  [hidden] { display: none !important; }
+  @media (max-width: 700px) { .linha { grid-template-columns: 1fr; } .linha output { text-align: left; } }
+</style>
+</head>
+<body>
+<h1>Multigrid geométrico — Poisson e equação do calor</h1>
+
+<div class="controles">
+  <div class="linha">
+    <label>Problema</label>
+    <div class="grupo" id="g_problema">
+      <input type="radio" name="problema" id="p_poisson" value="POISSON" checked><label for="p_poisson">Poisson</label>
+      <input type="radio" name="problema" id="p_calor" value="CALOR"><label for="p_calor">Equação do calor</label>
+    </div><span></span>
+  </div>
+  <div class="linha">
+    <label>Dimensão</label>
+    <div class="grupo">
+      <input type="radio" name="dimensao" id="d1" value="1D"><label for="d1">1D</label>
+      <input type="radio" name="dimensao" id="d2" value="2D" checked><label for="d2">2D</label>
+      <input type="radio" name="dimensao" id="d3" value="3D"><label for="d3">3D</label>
+    </div><span></span>
+  </div>
+  <div class="linha">
+    <label>Algoritmo</label>
+    <div class="grupo">
+      <input type="radio" name="algoritmo" id="a_fmg" value="fmg" checked><label for="a_fmg">Multigrid completo</label>
+      <input type="radio" name="algoritmo" id="a_v" value="v"><label for="a_v">V-cycle puro</label>
+      <input type="radio" name="algoritmo" id="a_v1" value="v1"><label for="a_v1">V-cycle (1 engrossamento)</label>
+    </div><span></span>
+  </div>
+  <div class="linha">
+    <label for="k">Malha <em>n</em> (16·2<sup>k</sup>)</label>
+    <input type="range" id="k" min="0" max="6" step="1" value="3">
+    <output id="k_out"></output>
+  </div>
+  <div class="linha" id="l_K">
+    <label for="K">Frequência <em>K</em> (Poisson)</label>
+    <input type="range" id="K" min="1" max="8" step="1" value="4">
+    <output id="K_out"></output>
+  </div>
+  <div class="linha" id="l_EXP">
+    <label for="EXP">Termos <em>EXP</em> (Poisson)</label>
+    <input type="range" id="EXP" min="1" max="3" step="1" value="2">
+    <output id="EXP_out"></output>
+  </div>
+  <div class="linha" id="l_KC" hidden>
+    <label for="KC">Frequência <em>K</em> (calor)</label>
+    <input type="range" id="KC" min="1" max="20" step="1" value="10">
+    <output id="KC_out"></output>
+  </div>
+  <div class="linha" id="l_ALFA" hidden>
+    <label for="ALFA">Decaimento <em>α</em> (calor)</label>
+    <input type="range" id="ALFA" min="0" max="20" step="{{ alfa_passo }}" value="4">
+    <output id="ALFA_out"></output>
+  </div>
+  <div class="linha" id="l_TF" hidden>
+    <label for="TF">Tempo final <em>T</em></label>
+    <input type="range" id="TF" min="0" max="{{ tf_max }}" step="1" value="{{ tf_idx }}">
+    <output id="TF_out"></output>
+  </div>
+  <div class="linha" id="l_passos" hidden>
+    <label for="passos">Passos de tempo</label>
+    <input type="range" id="passos" min="1" max="{{ passos_max }}" step="1" value="10">
+    <output id="passos_out"></output>
+  </div>
+  <div class="linha" id="l_tol">
+    <label for="tol">Tolerância do resíduo</label>
+    <input type="range" id="tol" min="0" max="{{ tol_max }}" step="1" value="0">
+    <output id="tol_out"></output>
+  </div>
+
+  <div class="acoes">
+    <button id="b_exec">Executar</button>
+    <button id="b_ordem" class="sec" title="Roda n e 2n e calcula a ordem de convergência">Ordem de convergência</button>
+    <span id="l_tipo" hidden>
+      <span class="grupo">
+        <input type="radio" name="tipo" id="t_esp" value="espacial" checked><label for="t_esp">espacial</label>
+        <input type="radio" name="tipo" id="t_tmp" value="temporal"><label for="t_tmp">temporal</label>
+      </span>
+    </span>
+    <label class="auto"><input type="checkbox" id="auto" checked> atualizar ao mexer nos controles</label>
+  </div>
+  <p class="dica" id="dica"></p>
+</div>
+
+<div id="status"></div>
+<div id="erro" class="erro" hidden></div>
+
+<div id="saida" hidden>
+  <div class="cmd" id="cmd"></div>
+  <h2>Resultados</h2>
+  <table id="tab"></table>
+  <div id="figs"></div>
+  <h2>Saída do programa</h2>
+  <pre id="log"></pre>
+</div>
+
+<div id="saida_ordem" hidden>
+  <h2>Ordem de convergência</h2>
+  <div class="cmd" id="cmd_ordem"></div>
+  <pre id="log_ordem"></pre>
+</div>
+
+<script>
+(() => {
+  const KMAX = {{ kmax_js|safe }};
+  const PADRAO = {{ padrao_js|safe }};
+  const FAIXAS = {{ faixas_js|safe }};
+  const TF = {{ tf_js|safe }};
+  const $ = id => document.getElementById(id);
+  const val = nome => document.querySelector(`input[name=${nome}]:checked`).value;
+
+  let timer = null, ctrl = null, ultimaChave = "", ocupado = false;
+
+  function atualizarControles() {
+    const p = val("problema"), d = val("dimensao"), alg = val("algoritmo");
+    const kmax = KMAX[p + "_" + d];
+    const kmin = alg === "v1" ? 1 : 0;
+    const s = $("k");
+    s.min = kmin; s.max = kmax;
+    if (+s.value > kmax) s.value = kmax;
+    if (+s.value < kmin) s.value = kmin;
+    $("k_out").textContent = "n = " + 16 * 2 ** (+s.value);
+    $("K_out").textContent = $("K").value;
+    $("EXP_out").textContent = $("EXP").value + "  (freq. até " + Math.pow(+$("K").value, +$("EXP").value) + "π)";
+    $("KC_out").textContent = $("KC").value;
+    $("ALFA_out").textContent = (+$("ALFA").value).toFixed(1);
+    const tf = TF[+$("TF").value];
+    $("TF_out").textContent = tf;
+    $("passos_out").textContent = $("passos").value + "  (dt = " + (tf / +$("passos").value).toExponential(2) + ")";
+    const t = +$("tol").value;
+    $("tol_out").textContent = t === 0 ? "padrão" : "10^-" + t;
+    $("l_passos").hidden = p !== "CALOR";
+    $("l_tol").hidden = p !== "POISSON";
+    for (const id of ["l_K", "l_EXP"]) $(id).hidden = p !== "POISSON";
+    for (const id of ["l_KC", "l_ALFA", "l_TF"]) $(id).hidden = p !== "CALOR";
+    $("l_tipo").hidden = p !== "CALOR";
+    $("dica").textContent = p === "POISSON"
+      ? `Solução fabricada u = S(x)·S(y)…, com S(t) = Σ_{j=1..EXP} sen(K^j π t). Alterar K ou EXP recompila o executável (alguns segundos na primeira vez).`
+      : `u = e^(−αt)·sen(Kπx)·sen(Kπy)…; dt = T / passos. Alterar K, α ou T recompila o executável (alguns segundos na primeira vez).`;
+  }
+
+  function params() {
+    const c = { problema: val("problema"), dimensao: val("dimensao"),
+                algoritmo: val("algoritmo"), k: $("k").value, passos: $("passos").value };
+    if (c.problema === "POISSON") { c.K = $("K").value; c.EXP = $("EXP").value; }
+    else { c.KC = $("KC").value; c.ALFA = $("ALFA").value; c.tf = $("TF").value; }
+    if (+$("tol").value > 0) c.tol = $("tol").value;
+    return new URLSearchParams(c);
+  }
+
+  function erro(msg) { $("erro").textContent = msg; $("erro").hidden = false; }
+
+  async function chamar(url, destino) {
+    if (ctrl) ctrl.abort();
+    ctrl = new AbortController();
+    $("erro").hidden = true;
+    $("status").textContent = "Calculando…";
+    $("b_exec").disabled = $("b_ordem").disabled = true;
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      const d = await r.json();
+      if (!r.ok) { erro(d.erro || "Erro desconhecido."); return; }
+      destino(d);
+    } catch (e) {
+      if (e.name !== "AbortError") erro("Falha de rede: " + e.message);
+    } finally {
+      $("status").textContent = "";
+      $("b_exec").disabled = $("b_ordem").disabled = false;
+    }
+  }
+
+  function executar() {
+    const q = params().toString();
+    ultimaChave = q;
+    chamar("/api/executar?" + q, d => {
+      $("cmd").textContent = d.comando;
+      $("tab").innerHTML = d.resultados.map(
+        ([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+      $("figs").innerHTML = d.figuras.map(
+        f => `<h2>${f.titulo}</h2><img src="${f.img}" alt="${f.titulo}">`).join("");
+      $("log").textContent = d.log;
+      $("saida").hidden = false;
+    });
+  }
+
+  function ordem() {
+    const q = params(); q.set("tipo", val("tipo"));
+    chamar("/api/ordem?" + q.toString(), d => {
+      $("cmd_ordem").textContent = d.comando;
+      $("log_ordem").textContent = d.saida;
+      $("saida_ordem").hidden = false;
+    });
+  }
+
+  function agendar() {
+    atualizarControles();
+    if (!$("auto").checked) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (params().toString() !== ultimaChave) executar(); }, 500);
+  }
+
+  for (const el of document.querySelectorAll(".controles input:not(#auto)"))
+    el.addEventListener("input", agendar);
+  $("b_exec").addEventListener("click", executar);
+  $("b_ordem").addEventListener("click", ordem);
+
+  atualizarControles();
+  executar();
+})();
+</script>
+</body>
+</html>
